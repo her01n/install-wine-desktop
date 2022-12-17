@@ -1,0 +1,91 @@
+#!/usr/bin/python3
+
+# TODO
+# - verbose switch
+# - do not overwrite output files, unless with '--force'
+# - another argument may be the name of the application
+# - uninstall command
+# - accept category argument, "game" may be default
+# - remove the temporary directory in case of error
+
+import argparse
+import natsort
+import os
+import shutil
+import subprocess
+import sys
+
+def log(message):
+  return False
+
+def execute(args):
+  subprocess.run(args).check_returncode()
+
+def extract_icon(executable, filename):
+  tmp = "/tmp/install-wine-desktop-" + filename
+  os.makedirs(tmp, exist_ok=True)
+  execute(["wrestool", "--extract", "--type=group_icon", executable, "--output=" + tmp])
+  # TODO handle the case where executable does not contain any icons
+  icos = [ico for ico in os.listdir(tmp) if ico.endswith(".ico")]
+  ico = natsort.natsorted(icos)[0]
+  execute(["convert", tmp + "/" + ico, tmp + "/" + filename + ".png"])
+  # TODO distribute the icons to icons subdirectories based on size
+  pngs = [png for png in os.listdir(tmp) if png.endswith(".png")]
+  png = natsort.natsorted(pngs)[0]
+  icons = os.environ["HOME"] + "/.local/share/icons"
+  os.makedirs(icons, exist_ok=True)
+  shutil.move(tmp + "/" + png, icons + "/" + filename + ".png")
+  shutil.rmtree(tmp)
+
+def find_prefix(executable):
+  i = os.path.abspath(executable)
+  while i != "/":
+    if os.path.exists(os.path.join(i, "system.reg")):
+      return i
+    i = os.path.dirname(i)
+  raise Exception("wine prefix not found for " + executable)
+
+def generate_desktop(output, path, name, filename, directory, prefix):
+  output.write("[Desktop Entry]\n")
+  output.write("Type=Application\n")
+  output.write("Name=" + name + "\n")
+  output.write("Path=" + directory + "\n")
+  # TODO escape prefix?
+  output.write("Exec=/usr/bin/env WINEPREFIX=" + prefix + " wine \"" + path + "\"\n")
+  output.write("Icon=" + filename + "\n")
+  # XXX
+  output.write("Categories=Game;ArcadeGame;\n")
+
+def install_desktop(executable):
+  path = os.path.abspath(executable)
+  # the name of the exe file without extension
+  # name = os.path.splitext(os.path.basename(executable))[0]
+  name = os.path.basename(os.path.dirname(path))
+  filename = name.replace(" ", "-")
+  directory = os.path.dirname(path)
+  prefix = find_prefix(executable)
+  desktop = os.environ['HOME'] + "/.local/share/applications/" + filename + ".desktop"
+  # print("executable: " + executable)
+  # print("working directory: " + directory)
+  # print("wine prefix: " + prefix)
+  # print("name: " + name)
+  # print("desktop file: " + desktop)
+  extract_icon(executable, filename)
+  os.makedirs(os.path.dirname(desktop), exist_ok=True)
+  output = open(desktop, "w")
+  generate_desktop(output, path, name, filename, directory, prefix)
+  output.close()
+  
+def parse_arguments():
+  parser = argparse.ArgumentParser(
+    prog = 'install-wine-desktop',
+    description = 'Create a .desktop file for a wine executable.')
+  parser.add_argument('executable', help='Path to wine executable')
+  return parser.parse_args()
+
+def main():
+  args = parse_arguments()
+  install_desktop(args.executable)
+
+main()
+
